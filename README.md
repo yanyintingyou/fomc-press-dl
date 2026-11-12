@@ -1,92 +1,81 @@
-<p align="right"><b>简体中文</b> · <a href="README.en.md">English</a></p>
+# fomc-press-dl
 
-# FOMC 新闻发布会视频下载工具
+[简体中文](README.zh-CN.md) | English
 
-从美联储官方 YouTube 频道抓取视频元数据，筛选出 FOMC 新闻发布会（Press Conference），批量下载为本地 MP4，供学术研究使用。
+Download FOMC press conference videos from the Federal Reserve's YouTube channel, named so they sort by date.
 
-## 工作流程
+The repo holds two scripts. The first reads the channel listing and writes a metadata workbook. The second filters that workbook down to press conferences and downloads the videos.
 
-```
-1_fetch_metadata.py  →  fed_raw_metadata.xlsx  →  2_download_videos.py  →  raw_videos/*.mp4
-```
+## Why this exists
 
-两个脚本按顺序运行。第一个只抓频道列表，第二个筛选并下载。
+FOMC research often needs the press conference footage itself. Pulling it by hand means scrolling the Fed's uploads, opening each video, and renaming the file. The channel mixes full press conferences with shorter introductory statements and other uploads, so a title match alone is not enough.
 
-## 环境要求
+This tool scans the channel once, keeps videos with a press conference title and a runtime over 13 minutes, and names each file with its meeting date.
 
-- Python 3.9 或更高版本
-- ffmpeg，并已加入 PATH。yt-dlp 需要它把视频流和音频流合并为 MP4。
-- Python 依赖：yt-dlp、pandas、openpyxl、tqdm（见 `requirements.txt`）
+## Quick start
 
-## 快速开始
+Requirements:
+
+- Python 3.9+
+- ffmpeg on your PATH (yt-dlp merges separate video and audio streams into MP4)
+- `pip install -r requirements.txt`
 
 ```bash
-git clone https://github.com/yanyintingyou/fomc-press-conference-video-downloader.git
-cd fomc-press-conference-video-downloader
+git clone https://github.com/yanyintingyou/fomc-press-dl.git
+cd fomc-press-dl
 pip install -r requirements.txt
 
 python 1_fetch_metadata.py
 python 2_download_videos.py
 ```
 
-### 第一步：抓取元数据
+Step 1 writes `fed_raw_metadata.xlsx`. Step 2 prints the matching videos and waits for `y` before downloading.
 
-`1_fetch_metadata.py` 用 yt-dlp 的 flat 模式扫描 `@federalreserve` 频道的视频列表，不下载视频文件。结果写入 `fed_raw_metadata.xlsx`，包含上传日期、标题、时长、完整链接、视频 ID 和播放量，按上传日期从新到旧排列。
+## What you get
 
-```bash
-python 1_fetch_metadata.py
-```
+| Path | Contents |
+|---|---|
+| `fed_raw_metadata.xlsx` | Videos found on the channel's uploads tab: upload date, title, duration, URL, video ID, view count |
+| `fed_targets_checklist.xlsx` | The filtered press conference list |
+| `raw_videos/` | MP4 files named `YYYY-MM-DD_title.mp4` |
 
-耗时取决于频道视频数量和网络状况。
+## How the filter works
 
-### 第二步：筛选并下载
+`2_download_videos.py` applies three rules:
 
-`2_download_videos.py` 读取上一步的表格，按以下默认条件筛选：
+| Rule | Value |
+|---|---|
+| Title contains | `Press Conference` (case-insensitive) |
+| Title excludes | `Introductory Statement` |
+| Duration | Over 800 seconds (about 13 minutes) |
 
-| 条件 | 值 |
-| --- | --- |
-| 标题包含 | `Press Conference`（不区分大小写） |
-| 标题排除 | `Introductory Statement` |
-| 时长 | 大于 800 秒（约 13 分钟） |
+It reads the meeting date from English titles such as `January 29, 2020`. Titles without a recognizable date save under `Unknown_Date`.
 
-日期从标题中的英文日期（如 `January 29, 2020`）解析。筛选结果保存到 `fed_targets_checklist.xlsx`，同时在终端列出待下载视频，输入 `y` 确认后开始下载。
+The rules live in `filter_videos()`. Edit that function to change keywords or the duration threshold. Change `CHANNEL_URL` in `1_fetch_metadata.py` to scan a different channel.
 
-```bash
-python 2_download_videos.py
-```
+## Configuration
 
-下载使用 4 个线程，优先选择 1080p 及以下的 MP4 流，找不到时回退到最佳可用格式。文件保存到 `raw_videos/`，命名为 `YYYY-MM-DD_标题.mp4`。已存在的文件会跳过，中断后重新运行即可。
+| File | Variable | Default | Purpose |
+|---|---|---|---|
+| `1_fetch_metadata.py` | `CHANNEL_URL` | `@federalreserve` videos tab | Channel to scan |
+| | `OUTPUT_EXCEL` | `fed_raw_metadata.xlsx` | Metadata output |
+| `2_download_videos.py` | `METADATA_FILE` | `fed_raw_metadata.xlsx` | Input metadata |
+| | `CHECKLIST_FILE` | `fed_targets_checklist.xlsx` | Filtered list output |
+| | `DOWNLOAD_DIR` | `raw_videos` | Download folder |
+| | `MAX_WORKERS` | `4` | Concurrent downloads |
 
-## 输出文件
+## Download behavior
 
-| 路径 | 内容 |
-| --- | --- |
-| `fed_raw_metadata.xlsx` | 频道全部视频的元数据 |
-| `fed_targets_checklist.xlsx` | 筛选出的新闻发布会清单 |
-| `raw_videos/` | 下载好的 MP4 视频 |
+The downloader runs four threads. Each task waits 0.5 to 2 seconds before it starts, and each video downloads up to four fragments in parallel. yt-dlp prefers MP4 streams at 1080p or lower and falls back to the best available format. Existing files are skipped, so an interrupted run can be restarted.
 
-## 配置
+## Known limits
 
-脚本顶部的常量可以直接修改：
-
-| 文件 | 变量 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `1_fetch_metadata.py` | `CHANNEL_URL` | 美联储 YouTube 频道 | 要扫描的频道地址 |
-| | `OUTPUT_EXCEL` | `fed_raw_metadata.xlsx` | 元数据输出文件 |
-| `2_download_videos.py` | `METADATA_FILE` | `fed_raw_metadata.xlsx` | 输入的元数据文件 |
-| | `CHECKLIST_FILE` | `fed_targets_checklist.xlsx` | 筛选结果清单 |
-| | `DOWNLOAD_DIR` | `raw_videos` | 下载目录 |
-| | `MAX_WORKERS` | `4` | 并发线程数 |
-
-筛选关键词和时长阈值写在 `2_download_videos.py` 的 `filter_videos()` 里。换频道改 `CHANNEL_URL`，改筛选条件改这个函数。
-
-## 注意事项
-
-- 元数据通过 flat 模式获取，个别字段（如播放量）可能因 YouTube 返回内容不同而缺失，不影响筛选和下载。
-- 下载任务之间随机等待 0.5–2 秒，单个视频内部并发下载 4 个分片。遇到限流或连接失败时，把 `MAX_WORKERS` 调低后重试。
-- yt-dlp 无法解析 YouTube 时，先升级到最新版：`pip install -U yt-dlp`。
-- 本工具用于个人学习与学术研究。下载和使用视频请遵守 YouTube 服务条款以及视频内容的版权规定。
+- Metadata comes from yt-dlp's flat extraction. Some fields, such as view counts, can be empty depending on what YouTube returns. Filtering and downloads do not depend on them.
+- Dates come from title text. A title with an unusual date format saves under `Unknown_Date`.
+- YouTube rate limits or bot checks can interrupt a run. Lower `MAX_WORKERS` and retry, or upgrade yt-dlp with `pip install -U yt-dlp`.
+- The scripts download what the channel publishes. Check YouTube's terms and the rights that apply to each video before you redistribute it.
+- Built for research use, including personal study and academic work.
 
 ## License
 
-MIT
+MIT. Built by [yanyintingyou](https://github.com/yanyintingyou).
